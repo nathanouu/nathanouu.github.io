@@ -1,45 +1,301 @@
-<!doctype html>
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+    body {
+        width: 940px;
+        margin: 0 auto;
+        margin-top: 2em;
+    }
 
-<title>Linking to Data Table</title>
-<!-- http://syntagmatic.github.com/parallel-coordinates/ -->
-<link rel="stylesheet" type="text/css" href="style.css">
-<link rel="stylesheet" type="text/css" href="d3.parcoords.css">
+    svg {
+        font: 10px sans-serif;
+    }
 
-<script src="d3.min.js"></script>
-<script src="d3.parcoords.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crossfilter/1.3.12/crossfilter.js"></script>
+    .axis path,
+    .axis line {
+        fill: none;
+        stroke: black;
+        shape-rendering: crispEdges;
+    }
+    div.tooltipMap {
+        position: absolute;
+        text-align: center;
+        width: 60px;
+        height: 28px;
+        padding: 2px;
+        font: 12px sans-serif;
+        background: lightsteelblue;
+        border: 0px;
+        border-radius: 8px;
+        pointer-events: none;
+    }
 
-<div id="example" class="parcoords" style="height: 700px; width: 1200px; float: right"></div>
+    div.tooltipScatter {
+        position: absolute;
+        text-align: center;
+        width: 150px;
+        height: 30px;
+        padding: 2px;
+        font: 12px sans-serif;
+        background: #80dbe1;
+        border: 0px;
+        border-radius: 8px;
+        pointer-events: none;
+    }
+    .highlighted {
+        fill: red;
+        fill-opacity: 0.5;
+        stroke-width: 2px;
+        stroke: #ff3d13;
+    }
+    .highlighted2  {
+        stroke: #aa1610 !important;
+        stroke-width: 2px !important;
+    }
 
-<script id="brushing">// quantitative colour scale
+</style>
+<body>
+<script src="http://d3js.org/d3.v4.min.js"></script>
+<script src="http://d3js.org/queue.v1.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script>
+    /**
+     * copied from the following resources:
+     * http://bl.ocks.org/micahstubbs/281d7b7a7e39a9b59cf80f1b8bd41a72
+     * http://bl.ocks.org/msbarry/9911363
+     * http://bl.ocks.org/weiglemc/6185069
+     * http://bl.ocks.org/d3noob/a22c42db65eb00d4e369
+     *
+    **/
 
-var parcoords = d3.parcoords()("#example")
-    .alpha(0.4); // For line stroke
+	const margin = {top: 0, right: 0, bottom: 0, left: 0};
+	const width = 960 - margin.left - margin.right;
+	const height = 1000 - margin.top - margin.bottom;
 
-// load csv file and create the chart
-d3.csv('videogamedata.csv', function(data) {
+	const color = d3.scaleThreshold()
+			.domain([0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ])
+			.range(['rgb(247,251,255)', 'rgb(222,235,247)', 'rgb(198,219,239)', 'rgb(158,202,225)', 'rgb(107,174,214)', 
+                'rgb(66,146,198)', 'rgb(33,113,181)', 'rgb(8,81,156)', 'rgb(8,48,107)', 'rgb(3,19,43)']);
 
-    //Keep the specific columns
-    var dataNew = data.map(function (d) {
-        return {
-            "Name" : d.Name,
-            "Platform" : d.Platform,
-            "Genre" : d.Genre,
-            "Global_Sales": +d.Global_Sales
-        }
-    })
+	const svg = d3.select('body')
+			.append('svg')
+			.attr('width', width)
+			.attr('height', height);
 
-    var cfData = crossfilter(dataNew);
-    var dataDim = cfData.dimension(function (d) {
-        return d.Global_Sales;
-    })
+    const map = svg
+        .append('g')
+        .attr('class', 'map');
 
-    var filteredNew = dataDim.top(50);
-    console.log(filteredNew);
-    // Use parcoords library in the filtered data
-    parcoords
-        .data(filteredNew)
-        .render()
-        .createAxes();
-});
+    const scatterplot = svg
+        .append('g')
+        .attr('class', 'scatterplot')
+        .attr("transform", "translate(100,500)");
+
+    const projection = d3.geoMercator()
+			.scale(130)
+			.translate( [width / 2, height / 1.5/2]);
+
+	const path = d3.geoPath().projection(projection);
+
+	queue()
+			.defer(d3.json, 'world_countries.json')
+            .defer(d3.tsv, 'world_population.tsv')
+            .defer(d3.csv, 'who.csv')
+			.await(ready);
+
+	function ready(error, data, population, who) {
+		const fertilityById = {};
+
+        population.forEach(d =>
+        {
+            var res = who.find(e =>
+            {
+                return e.Country == d.name;
+            });
+            if(typeof res !== 'undefined') {
+                res.id = d.id;
+            }
+        });
+
+        who.forEach(d => { fertilityById[d.id] = +d['Total fertility rate (per woman)']; });
+        data.features.forEach(d => { d.population = fertilityById[d.id] });
+
+        // Define the div for the tooltip
+        var tooltipMap = d3.select("body").append("div")
+            .attr("class", "tooltipMap")
+            .style("opacity", 0);
+
+        var toolTipScatter = d3.select("body").append("div")
+            .attr("class", "tooltipScatter")
+            .style("opacity", 0);
+
+        svg.append('g')
+				.attr('class', 'countries')
+				.selectAll('path')
+				.data(data.features)
+				.enter().append('path')
+                .attr("class", d => { return "COUNTRY-CODE-"+d.id;} )
+                .attr("class", d => { return "country " +d.properties.name;} )
+				.attr('d', path)
+				.style('fill', d => color(fertilityById[d.id]))
+				.style('stroke', 'white')
+				.style('opacity', 0.8)
+				.style('stroke-width', 0.3)
+				/*.on('mouseover',function(d){
+				    console.log(d.properties.name);
+                    tooltipMap.transition()
+                        .duration(200)
+                        .style("opacity", .9);
+                    tooltipMap	.html(d.properties.name)
+                        .style("left", (d3.event.pageX) + "px")
+                        .style("top", (d3.event.pageY - 28) + "px");
+                })
+				.on('mouseout', function(d){
+                    tooltipMap.transition()
+                        .duration(500)
+                        .style("opacity", 0);
+                });*/
+
+		svg.append('path')
+				.datum(topojson.mesh(data.features, (a, b) => a.id !== b.id))
+				.attr('class', 'names')
+				.attr('d', path);
+
+        // setup x
+        var xValue = function(d) { return d["Life expectancy at birth (years) female"];}, // data -> value
+            xScale = d3.scaleLinear().range([0, height/2-100]), // value -> display
+            xMap = function(d) { return xScale(xValue(d));}, // data -> display
+            xAxis = d3.axisBottom().scale(xScale);
+
+        // setup y
+        var yValue = function(d) { return d["Life expectancy at birth (years) male"];}, // data -> value
+            yScale = d3.scaleLinear().range([height/2-100, 0]), // value -> display
+            yMap = function(d) { return yScale(yValue(d));}, // data -> display
+            yAxis = d3.axisLeft().scale(yScale);
+
+        // don't want dots overlapping axis, so add in buffer to data domain
+        xScale.domain([35, 90]);
+        yScale.domain([35, 90]);
+
+        // x-axis
+        scatterplot.append("g")
+            .attr("class", "x axis")
+            .attr("transform", "translate(0," + (height/2-100) + ")")
+            .call(xAxis)
+            .append("text")
+            .attr("class", "label")
+            .attr("x", width)
+            .attr("y", -6)
+            .style("text-anchor", "end")
+            .text("Calories");
+
+        // y-axis
+        scatterplot.append("g")
+            .attr("class", "y axis")
+            .call(yAxis)
+            .append("text")
+            .attr("class", "label")
+            .attr("transform", "rotate(-90)")
+            .attr("y", 6)
+            .attr("dy", ".71em")
+            .style("text-anchor", "end")
+            .text("Protein (g)");
+
+        // draw dots
+        scatterplot.selectAll(".dot")
+            .data(who)
+            .enter().append("circle")
+            .attr("class", d => { return "dot COUNTRY-"+d.Country; } )
+            .attr("r", 3.5)
+            .attr("cx", xMap)
+            .attr("cy", yMap)
+            .style("fill", function(d) { return color(fertilityById[d.id]);})
+
+
+        // draw legend
+        var legend = scatterplot.selectAll(".legend")
+            .data(color.domain())
+            .enter().append("g")
+            .attr("class", "legend")
+            .attr("transform", function(d, i) { return "translate(-300," + i * 20 + ")"; });
+
+        // draw legend colored rectangles
+        legend.append("rect")
+            .attr("x", width - 18)
+            .attr("width", 18)
+            .attr("height", 18)
+            .style("fill", color);
+
+        // draw legend text
+        legend.append("text")
+            .attr("x", width - 24)
+            .attr("y", 9)
+            .attr("dy", ".35em")
+            .style("text-anchor", "end")
+            .text(function(d) { return d;})
+
+
+
+            const map = d3.select(".countries");
+            const scatter = d3.select(".scatterplot");
+
+            //On click, highlight the selected circle and country
+            scatter.selectAll('circle').on('click', function (d) {
+                console.log(this);
+                let $this = d3.select(this);
+                let $classed = !$this.attr('class').includes('highlighted');
+                $this.classed('highlighted', $classed);
+
+                map.selectAll('.country').filter(function (dd) {
+                    return dd.properties.name === d.Country;
+                }).classed('highlighted2', $classed);
+
+            })
+            .on('mouseover',function (d) { // Tooltip functionality
+                toolTipScatter.transition()
+                    .duration(200)
+                    .style("opacity", .9);
+                toolTipScatter.html("Life Expectancy Male: "+d['Life expectancy at birth (years) female']+ "</br>" + "Life Expectancy Female: " +d['Life expectancy at birth (years) male'])
+                    .style("left", (d3.event.pageX) + "px")
+                    .style("top", (d3.event.pageY - 28) + "px");
+            })
+            .on('mouseout', function (d) {
+                toolTipScatter.transition()
+                    .duration(500)
+                    .style("opacity", 0);
+            });
+
+            //Country selection and tooltip functionality in map
+            map.selectAll('.country').on('mouseover', function (d) {
+                d3.select(this).classed('highlighted2', true);
+
+                scatter.selectAll('circle').filter(function (dd) {
+                    return dd.Country === d.properties.name;
+                }).classed('highlighted', true);
+
+                tooltipMap.transition()
+                    .duration(200)
+                    .style("opacity", .9);
+                tooltipMap	.html(d.properties.name)
+                    .style("left", (d3.event.pageX) + "px")
+                    .style("top", (d3.event.pageY - 28) + "px");
+
+            }).on('mouseout', function (d) {
+
+                d3.select(this).classed('highlighted2', false);
+                scatter.selectAll('circle').filter(function (dd) {
+                    return dd.Country === d.properties.name;
+                }).classed('highlighted', false);
+
+                tooltipMap.transition()
+                    .duration(500)
+                    .style("opacity", 0);
+
+            })
+
+    };
+
+
 </script>
+</body>
+</html>
